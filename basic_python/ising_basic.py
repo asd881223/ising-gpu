@@ -17,13 +17,16 @@
  # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  # FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  # DEALINGS IN THE SOFTWARE.
+    
+    
+# 在 update lattice 新增新加入的參數 h and h_op_lattice
 
 import argparse
 import math
 import sys
 import time
 
-import cupy.cuda.curand as curand
+from cupy.cuda import curand
 from mpi4py import MPI
 from numba import cuda
 from numba import vectorize
@@ -67,16 +70,40 @@ inv_temp = (1.0) / (args.alpha * TCRIT)
 
 # Generate lattice with random spins with shape of randval array
 @vectorize(['int8(float32)'], target='cuda')                             
-def generate_lattice(randval):
+def generate_lattice(randval):            # 產生lattice 裡面是 1 and -1 
     return 1 if randval > 0.5 else -1 
+
+@vectorize(['int8(float32)'], target='cuda')                             
+def generate_one(randval):            # 產生lattice 裡面是 1 and -1 
+    if randval>=0.9:
+        return 9
+    elif randval>=0.8:
+        return 8
+    elif randval>=0.7:
+        return 7
+    elif randval>=0.6:
+        return 6
+    elif randval>=0.5:
+        return 5
+    elif randval>=0.4:
+        return 4
+    elif randval>=0.3:
+        return 3
+    elif randval>=0.2:
+        return 2
+    elif randval>=0.1:
+        return 1
+    else:
+        return 0
+
 
 @cuda.jit
 def update_lattice_multi(lattice, op_lattice, op_lattice_up, op_lattice_down, randvals, is_black):
     n,m = lattice.shape
     tid = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
-    j = tid % m
-    i = tid // m
-
+    j = tid % m  #(0 ~ 127)
+    i = tid // m #(0,0...,1,1)
+    #(i,j) = (0,1),(0,2),(0,3),...,(0,126),(0,127)
     if (i >= n or j >= m): return
 
     # Set stencil indices with periodicity
@@ -103,15 +130,24 @@ def update_lattice_multi(lattice, op_lattice, op_lattice_up, op_lattice_down, ra
 
 # Create lattice update kernel (for single GPU case, this version with fewer arguments
 # is a bit faster due to launch overhead introduced by numba)
+#################################################################################################################
 @cuda.jit
-def update_lattice(lattice, op_lattice, randvals, is_black):
-    n,m = lattice.shape
+def update_lattice(lattice, op_lattice, lattice_h, randvals, is_black):  
+    
+    #if is_black == True, lattice = lattice_b ,op_lattice = lattice_w    
+    # maybe lattice = sigma i ,op_lattice = sigma j 
+    
+    mu = 1 # magentic feild
+    
+    n,m = lattice.shape #(128,64)
     tid = cuda.blockIdx.x * cuda.blockDim.x + cuda.threadIdx.x
-    i = tid // m
-    j = tid % m
+    #print("blockid,blockdim,threadid,tid = ",cuda.blockIdx.x)
+    i = tid // m   #(0,0,0,...,1,1)
+    j = tid % m    #(0,1,2,...,127))
+    #(i,j) = (0,1),(0,2),(0,3),...,(0,126),(0,127)
 
     if (i >= n or j >= m): return
-
+    
     # Set stencil indices with periodicity
     ipp = (i + 1) if (i + 1) < n else 0
     jpp = (j + 1) if (j + 1) < m else 0
@@ -124,34 +160,45 @@ def update_lattice(lattice, op_lattice, randvals, is_black):
     else:
         joff = jnn if (i % 2) else jpp
 
+    h_sum = lattice_h[i,j] # h * sigma i
+    
+    h_sum *= mu# mu = 1
+    
     # Compute sum of nearest neighbor spins
-    nn_sum = op_lattice[inn, j] + op_lattice[i, j] + op_lattice[ipp, j] + op_lattice[i, joff]
-
+    nn_sum = op_lattice[inn, j] + op_lattice[i, j] + op_lattice[ipp, j] + op_lattice[i, joff] #+ h_sum
+    # opcolor       上,                  中,                   下  +         (奇數+右,偶數+左) (paper的fig3)
+    
+    #h應該不用oplattice如果h是傳進來的矩陣sigma i and sigma j 分別是不同的 矩陣
+    # i 是 white j 是black sigma j*h = op_lattice*h矩陣(*)
+    
     # Determine whether to flip spin
-    lij = lattice[i, j]
+    #需要flip就加一個負號
+    lij = lattice[i, j]    # sigma i
     acceptance_ratio = math.exp(-2.0 * inv_temp * nn_sum * lij)
     if (randvals[i, j] < acceptance_ratio):
         lattice[i, j] = -lij
+        
+##################################################################################################################
 
 # Write lattice configuration to file
 def write_lattice(prefix, lattice_b, lattice_w):
-  lattice_b_h = lattice_b.copy_to_host()
-  lattice_w_h = lattice_w.copy_to_host()
-  lattice = np.zeros((lattice_slab_n, args.lattice_m), dtype=np.int8)
-  for i in range(lattice_slab_n):
-      for j in range(args.lattice_m // 2):
-          if (i % 2):
-              lattice[i, 2*j+1] = lattice_b_h[i, j]
-              lattice[i, 2*j] = lattice_w_h[i, j]
-          else:
-              lattice[i, 2*j] = lattice_b_h[i, j]
-              lattice[i, 2*j+1] = lattice_w_h[i, j]
+    lattice_b_h = lattice_b.copy_to_host()       # lattice_b_host
+    lattice_w_h = lattice_w.copy_to_host()       # lattice_w_host
+    lattice = np.zeros((lattice_slab_n, args.lattice_m), dtype=np.int8)
+    for i in range(lattice_slab_n):
+        for j in range(args.lattice_m // 2):
+            if (i % 2):
+                lattice[i, 2*j+1] = lattice_b_h[i, j]
+                lattice[i, 2*j] = lattice_w_h[i, j]
+            else:
+                lattice[i, 2*j] = lattice_b_h[i, j]
+                lattice[i, 2*j+1] = lattice_w_h[i, j]
 
-  print("Writing lattice to {}_rank{}.txt...".format(prefix, rank))
-  np.savetxt("{}_rank{}.txt".format(prefix, rank), lattice, fmt='%d')
+    print("Writing lattice to {}_rank{}.txt...".format(prefix, rank))
+    np.savetxt("{}_rank{}.txt".format(prefix, rank), lattice, fmt='%d')
 
 # Helper class for random number generation
-class curandUniformRNG:
+class curandUniformRNG:                  ##### 設定random產生器
     def __init__(self, seed=0):
         rng = curand.createGenerator(curand.CURAND_RNG_PSEUDO_PHILOX4_32_10)
         curand.setPseudoRandomGeneratorSeed(rng, seed)
@@ -160,7 +207,7 @@ class curandUniformRNG:
             curand.setGeneratorOffset(rng, self.offset)
         self._rng = rng
 
-    def fill_random(self, arr):
+    def fill_random(self, arr):          #####  設定 array 裡面是 random number
         ptr = arr.__cuda_array_interface__['data'][0]
         curand.generateUniform(self._rng, ptr, arr.size)
         if (args.use_common_seed):
@@ -169,15 +216,15 @@ class curandUniformRNG:
 
 # Helper function to perform device sync plus MPI barrier
 def sync():
-  cuda.synchronize()
-  comm.barrier()
+    cuda.synchronize()
+    comm.barrier()
 
-def update(lattices_b, lattices_w, randvals, rng):
+def update(lattices_b, lattices_w, lattice_h, randvals, rng):
     # Setup CUDA launch configuration
     threads = 128
-    blocks = (args.lattice_m // 2 * lattice_slab_n + threads - 1) // threads
+    blocks = (args.lattice_m // 2 * lattice_slab_n + threads - 1) // threads  # thread id
 
-    if (comm.size > 1):
+    if (comm.size > 1):                 #####  multi-gpu   
         # Update black
         rng.fill_random(randvals)
         update_lattice_multi[blocks, threads](lattices_b[rank], lattices_w[rank], lattices_w[rank_up], lattices_w[rank_down], randvals, True)
@@ -186,13 +233,14 @@ def update(lattices_b, lattices_w, randvals, rng):
         rng.fill_random(randvals)
         update_lattice_multi[blocks, threads](lattices_w[rank], lattices_b[rank], lattices_b[rank_up], lattices_b[rank_down], randvals, False)
         sync()
-    else:
+    else:                              #####   single-gpu  (*)
         # Update black
         rng.fill_random(randvals)
-        update_lattice[blocks, threads](lattices_b[rank], lattices_w[rank], randvals, True)
+        update_lattice[blocks, threads](lattices_b[rank], lattices_w[rank], lattice_h[rank], randvals, True)
+        #print(lattice_h[rank])
         # Update white
         rng.fill_random(randvals)
-        update_lattice[blocks, threads](lattices_w[rank], lattices_b[rank], randvals, False)
+        update_lattice[blocks, threads](lattices_w[rank], lattices_b[rank], lattice_h[rank], randvals, False)
 
 
 # Set device
@@ -201,6 +249,9 @@ cuda.select_device(rank)
 # Setup cuRAND generator
 rng = curandUniformRNG(seed=args.seed if args.use_common_seed else args.seed + 42 * rank)
 randvals = cuda.device_array((lattice_slab_n, args.lattice_m // 2), dtype=np.float32)
+rand128 = cuda.device_array((lattice_slab_n, 1), dtype=np.float32)
+#print(lattice_slab_n)
+#print(randvals)
 
 # Setup black and white lattice arrays on device
 rng.fill_random(randvals)
@@ -208,19 +259,45 @@ lattice_b = generate_lattice(randvals)
 rng.fill_random(randvals)
 lattice_w = generate_lattice(randvals)
 
+print("slab_n",lattice_slab_n)
+print("comm_size",comm.size)
+##############################################   add a rand h[128,1]
+
+#print("############",*randvals)
+
+rng.fill_random(randvals)
+lattice_h = generate_one(randvals)
+
+#rng.fill_random(randvals)
+#lattice_h = generate_lattice(randvals)
+#lattice_h = generate_lattice(randvals)
+#for i in range (len(lattice_h)):
+#    print(f"{i}:",*lattice_h[i])  #################  lattice h[128,1] 用random value = 0~1  matrix
+
+#print("h[0,2]",*lattice_h)
+
+
+##############################################   end
+
 # Setup/open CUDA IPC handles
 ipch_b = comm.allgather(lattice_b.get_ipc_handle())
 ipch_w = comm.allgather(lattice_w.get_ipc_handle())
 lattices_b = [x.open() if i != rank else lattice_b for i,x in enumerate(ipch_b)]
 lattices_w = [x.open() if i != rank else lattice_w for i,x in enumerate(ipch_w)]
 
+##############################################   add   (why)
+ipch_h = comm.allgather(lattice_h.get_ipc_handle())
+lattices_h = [x.open() if i != rank else lattice_h for i,x in enumerate(ipch_h)]
+##############################################   end
+
 # Warmup iterations
 if rank == 0:
     print("Starting warmup...")
     sys.stdout.flush()
 sync()
+
 for i in range(args.nwarmup):
-    update(lattices_b, lattices_w, randvals, rng)
+    update(lattices_b, lattices_w, lattices_h, randvals, rng)
 sync()
 
 # Trial iterations
@@ -229,7 +306,7 @@ if rank == 0:
     sys.stdout.flush()
 t0 = time.time()
 for i in range(args.niters):
-    update(lattices_b, lattices_w, randvals, rng)
+    update(lattices_b, lattices_w, lattices_h, randvals, rng)
     if (rank == 0 and i % 1000 == 0):
         print("Completed {}/{} iterations...".format(i+1, args.niters))
         sys.stdout.flush()
@@ -243,17 +320,18 @@ m = (np.sum(lattices_b[rank], dtype=np.int64) + np.sum(lattices_w[rank], dtype=n
 m_global = comm.allreduce(m, MPI.SUM)
 
 if (rank == 0):
-  print("REPORT:")
-  print("\tnGPUs: {}".format(comm.size))
-  print("\ttemperature: {} * {}".format(args.alpha, TCRIT))
-  print("\tseed: {}".format(args.seed))
-  print("\twarmup iterations: {}".format(args.nwarmup))
-  print("\ttrial iterations: {}".format(args.niters))
-  print("\tlattice dimensions: {} x {}".format(args.lattice_n, args.lattice_m))
-  print("\telapsed time: {} sec".format(t))
-  print("\tupdates per ns: {}".format((args.lattice_n * args.lattice_m * args.niters) / t * 1e-9))
-  print("\taverage magnetism (absolute): {}".format(np.abs(m_global)))
-  sys.stdout.flush()
+    print(lattice_w.shape)
+    print("REPORT:")
+    print("\tnGPUs: {}".format(comm.size))
+    print("\ttemperature: {} * {}".format(args.alpha, TCRIT))
+    print("\tseed: {}".format(args.seed))
+    print("\twarmup iterations: {}".format(args.nwarmup))
+    print("\ttrial iterations: {}".format(args.niters))
+    print("\tlattice dimensions: {} x {}".format(args.lattice_n, args.lattice_m))
+    print("\telapsed time: {} sec".format(t))
+    print("\tupdates per ns: {}".format((args.lattice_n * args.lattice_m * args.niters) / t * 1e-9))
+    print("\taverage magnetism (absolute): {}".format(np.abs(m_global)))
+    sys.stdout.flush()
 
 sync()
 
