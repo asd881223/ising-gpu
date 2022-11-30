@@ -75,27 +75,12 @@ def generate_lattice(randval):            # 產生lattice 裡面是 1 and -1
 
 @vectorize(['int8(float32)'], target='cuda')                             
 def generate_one(randval):            # 產生lattice 裡面是 1 and -1 
-    if randval>=0.9:
-        return 9
-    elif randval>=0.8:
-        return 8
-    elif randval>=0.7:
-        return 7
-    elif randval>=0.6:
-        return 6
-    elif randval>=0.5:
-        return 5
-    elif randval>=0.4:
-        return 4
-    elif randval>=0.3:
-        return 3
-    elif randval>=0.2:
-        return 2
-    elif randval>=0.1:
-        return 1
-    else:
-        return 0
+    return randval/1000
 
+    #調整h
+@vectorize(['int8(float32)'], target='cuda')                             
+def generate_J(randval):            # 產生lattice 裡面是 1 and -1 
+    return 1.
 
 @cuda.jit
 def update_lattice_multi(lattice, op_lattice, op_lattice_up, op_lattice_down, randvals, is_black):
@@ -132,7 +117,7 @@ def update_lattice_multi(lattice, op_lattice, op_lattice_up, op_lattice_down, ra
 # is a bit faster due to launch overhead introduced by numba)
 #################################################################################################################
 @cuda.jit
-def update_lattice(lattice, op_lattice, lattice_h, randvals, is_black):  
+def update_lattice(lattice, op_lattice, lattice_h, lattice_J, randvals, is_black):  
     
     #if is_black == True, lattice = lattice_b ,op_lattice = lattice_w    
     # maybe lattice = sigma i ,op_lattice = sigma j 
@@ -160,12 +145,12 @@ def update_lattice(lattice, op_lattice, lattice_h, randvals, is_black):
     else:
         joff = jnn if (i % 2) else jpp
 
-    h_sum = lattice_h[i,j] # h * sigma i
+    h_sum = lattice_h[i,j] *lattice[i,j]# h * sigma i
     
     h_sum *= mu# mu = 1
     
     # Compute sum of nearest neighbor spins
-    nn_sum = op_lattice[inn, j] + op_lattice[i, j] + op_lattice[ipp, j] + op_lattice[i, joff] #+ h_sum
+    nn_sum = lattice_J[inn,j] * op_lattice[inn, j] + lattice_J[i,j] * op_lattice[i, j] + lattice_J[ipp,j] * op_lattice[ipp, j] + lattice_J[i,joff] * op_lattice[i, joff] + h_sum
     # opcolor       上,                  中,                   下  +         (奇數+右,偶數+左) (paper的fig3)
     
     #h應該不用oplattice如果h是傳進來的矩陣sigma i and sigma j 分別是不同的 矩陣
@@ -219,7 +204,7 @@ def sync():
     cuda.synchronize()
     comm.barrier()
 
-def update(lattices_b, lattices_w, lattice_h, randvals, rng):
+def update(lattices_b, lattices_w, lattice_h,lattice_J, randvals, rng):
     # Setup CUDA launch configuration
     threads = 128
     blocks = (args.lattice_m // 2 * lattice_slab_n + threads - 1) // threads  # thread id
@@ -236,11 +221,11 @@ def update(lattices_b, lattices_w, lattice_h, randvals, rng):
     else:                              #####   single-gpu  (*)
         # Update black
         rng.fill_random(randvals)
-        update_lattice[blocks, threads](lattices_b[rank], lattices_w[rank], lattice_h[rank], randvals, True)
+        update_lattice[blocks, threads](lattices_b[rank], lattices_w[rank], lattice_h[rank],lattices_J[rank], randvals, True)
         #print(lattice_h[rank])
         # Update white
         rng.fill_random(randvals)
-        update_lattice[blocks, threads](lattices_w[rank], lattices_b[rank], lattice_h[rank], randvals, False)
+        update_lattice[blocks, threads](lattices_w[rank], lattices_b[rank], lattice_h[rank],lattices_J[rank], randvals, False)
 
 
 # Set device
@@ -266,13 +251,14 @@ print("comm_size",comm.size)
 #print("############",*randvals)
 
 rng.fill_random(randvals)
-lattice_h = generate_one(randvals)
+lattice_h = generate_one(rand128)
 
+lattice_J = generate_J(randvals)
 #rng.fill_random(randvals)
 #lattice_h = generate_lattice(randvals)
 #lattice_h = generate_lattice(randvals)
-#for i in range (len(lattice_h)):
-#    print(f"{i}:",*lattice_h[i])  #################  lattice h[128,1] 用random value = 0~1  matrix
+for i in range (len(lattice_h)):
+    print(f"{i}:",*lattice_h[i])  #################  lattice h[128,1] 用random value = 0~1  matrix
 
 #print("h[0,2]",*lattice_h)
 
@@ -288,6 +274,9 @@ lattices_w = [x.open() if i != rank else lattice_w for i,x in enumerate(ipch_w)]
 ##############################################   add   (why)
 ipch_h = comm.allgather(lattice_h.get_ipc_handle())
 lattices_h = [x.open() if i != rank else lattice_h for i,x in enumerate(ipch_h)]
+ipch_J = comm.allgather(lattice_J.get_ipc_handle())
+lattices_J = [x.open() if i != rank else lattice_J for i,x in enumerate(ipch_J)]
+
 ##############################################   end
 
 # Warmup iterations
@@ -297,7 +286,7 @@ if rank == 0:
 sync()
 
 for i in range(args.nwarmup):
-    update(lattices_b, lattices_w, lattices_h, randvals, rng)
+    update(lattices_b, lattices_w, lattices_h,lattices_J, randvals, rng)
 sync()
 
 # Trial iterations
@@ -306,7 +295,7 @@ if rank == 0:
     sys.stdout.flush()
 t0 = time.time()
 for i in range(args.niters):
-    update(lattices_b, lattices_w, lattices_h, randvals, rng)
+    update(lattices_b, lattices_w, lattices_h,lattices_J, randvals, rng)
     if (rank == 0 and i % 1000 == 0):
         print("Completed {}/{} iterations...".format(i+1, args.niters))
         sys.stdout.flush()
