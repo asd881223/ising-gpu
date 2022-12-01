@@ -82,6 +82,15 @@ def generate_one(randval):            # 產生lattice 裡面是 1 and -1
 def generate_J(randval):            # 產生lattice 裡面是 1 and -1 
     return 1.
 
+def read_h():
+    path = "H.txt"
+    df2 = np.loadtxt(path)
+    lattice_h = np.array(df2,dtype = "float32") 
+    lattice_h = np.reshape(lattice_h,(990,1))
+    #print(lattice_h)
+    return cuda.to_device(lattice_h)
+
+
 @cuda.jit
 def update_lattice_multi(lattice, op_lattice, op_lattice_up, op_lattice_down, randvals, is_black):
     n,m = lattice.shape
@@ -251,14 +260,18 @@ print("comm_size",comm.size)
 #print("############",*randvals)
 
 rng.fill_random(randvals)
-lattice_h = generate_one(rand128)
+#lattice_h = generate_one(rand128)   ### generate random h[n,1]
+
+lattice_h = read_h()
+
+
 
 lattice_J = generate_J(randvals)
-#rng.fill_random(randvals)
-#lattice_h = generate_lattice(randvals)
-#lattice_h = generate_lattice(randvals)
-for i in range (len(lattice_h)):
-    print(f"{i}:",*lattice_h[i])  #################  lattice h[128,1] 用random value = 0~1  matrix
+
+
+
+#for i in range (len(lattice_h)):
+#    print(f"{i}:",*lattice_h[i])  #################  lattice h[128,1] 用random value = 0~1  matrix
 
 #print("h[0,2]",*lattice_h)
 
