@@ -25,6 +25,7 @@
 #include <getopt.h>
 #include <iostream>
 #include <string>
+#include <string.h>
 
 #include <cuda_fp16.h>
 #include <curand.h>
@@ -79,7 +80,6 @@ __global__ void init_J(float* lattice_J,
 /*
 void read_h(signed char* lattice_h, nx){
     
-    int num;
     FILE *fptr;
 
     fptr = fopen("H.txt","r");
@@ -313,13 +313,39 @@ int main(int argc, char **argv) {
   /////////////////////////////////////////////////////////////////////////setup h and J
   CHECK_CUDA(cudaMalloc(&lattice_h, nx * 1 * sizeof(*lattice_h)));
   CHECK_CUDA(cudaMalloc(&lattice_J, nx * ny/2 * sizeof(*lattice_J)));
-  //lattice_h = read_h(*lattice_h,nx);
-    
-  /*
+  float h[1000];  //////////////////////////////////////////////// read h
+  int count = 0;
+  FILE *fh = fopen("H.txt", "r");
   for(int i=0;i<nx;i++)
   {
-      print(&lattice_h[i]);
+      fscanf(fh,"%f",&h[i]);
+  }
+  /*for(int i=0;i<nx;i++)
+  {
+      printf("%lf\n",h[i]);
   }*/
+  fclose(fh);  ////////////////////////////////////////////////  end read h
+  
+  char row[1000];  //////////////////////////////////////////////// read Jij
+  float J[1000000];
+  char *token;
+  int c0 = 0;
+  int c1 = 0;
+  FILE *fj = fopen("Jij.txt", "r");
+  for(int i=0;i<nx*ny;i++)
+  {
+      fscanf(fj,"%f",&J[i]);
+  }
+  for(int i=0;i<nx*5;i++)
+  {
+      printf("%d : %lf\n",i,J[i]);
+  }
+  
+
+  fclose(fj);
+////////////////////////////////////////////////////////////////// end read Jij
+    
+    
 
   int blocks = (nx * ny/2 + THREADS - 1) / THREADS;
   CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
@@ -329,8 +355,8 @@ int main(int argc, char **argv) {
     
     
   //initial h and J
-  CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
-  init_h<<<blocks, THREADS>>>(lattice_h, randvals, nx, 1);
+  //CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
+  //init_h<<<blocks, THREADS>>>(lattice_h, randvals, nx, 1);
     
   
   CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
