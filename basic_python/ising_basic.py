@@ -90,6 +90,12 @@ def read_h():
     #print(lattice_h)
     return cuda.to_device(lattice_h)
 
+def read_J():
+    path = "Jij.txt"
+    df = np.loadtxt("Jij.txt",delimiter=",", dtype=float)
+    lattice_j = np.array(df)
+    return cuda.to_device(lattice_j)
+
 
 @cuda.jit
 def update_lattice_multi(lattice, op_lattice, op_lattice_up, op_lattice_down, randvals, is_black):
@@ -264,14 +270,19 @@ rng.fill_random(randvals)
 
 lattice_h = read_h()
 
+lattice_J = read_J()
+#print("###########",lattice_J)
 
 
-lattice_J = generate_J(randvals)
+#lattice_J = generate_J(randvals)
 
 
 
-#for i in range (len(lattice_h)):
-#    print(f"{i}:",*lattice_h[i])  #################  lattice h[128,1] 用random value = 0~1  matrix
+#for i in range (len(lattice_J)):
+#    if i % 100 == 0:
+#            print(f"{i}:",*lattice_J[i])  #################  lattice h[128,1] 用random value = 0~1  matrix
+
+        
 
 #print("h[0,2]",*lattice_h)
 
