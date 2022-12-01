@@ -52,7 +52,9 @@ __global__ void init_spins(signed char* lattice,
 }
 
 __global__ void init_h(signed char* lattice_h,
-                       const float* __restrict__ randvals,){
+                       const float* __restrict__ randvals,
+                       const long long nx,
+                       const long long ny){
   const long long  tid = static_cast<long long>(blockDim.x) * blockIdx.x + threadIdx.x;
   if (tid >= nx * ny) return;
     
@@ -64,37 +66,36 @@ __global__ void init_h(signed char* lattice_h,
 
 // Jij set 1
 __global__ void init_J(signed char* lattice_J,
-                       const float* __restrict__ randvals,){
+                       const float* __restrict__ randvals,
+                       const long long nx,
+                       const long long ny){
   const long long  tid = static_cast<long long>(blockDim.x) * blockIdx.x + threadIdx.x;
   if (tid >= nx * ny) return;
     
   //float randval = randvals[tid];
   signed char val = 1;
-  lattice_h[tid] = val;
+  lattice_J[tid] = val;
 }
-
-void read_h(signed char* lattice_h){
+/*
+void read_h(signed char* lattice_h, nx){
     
     int num;
     FILE *fptr;
 
-    // use appropriate location if you are using MacOS or Linux
-    fptr = fopen("C:\\H.txt","r");
+    fptr = fopen("H.txt","r");
 
-    if(fptr == NULL)
+    for(int i=0;i < nx;i++)
     {
-       printf("Error!");   
-       exit(1);             
+        fscanf(fptr, "%d", &lattice_h[i]);
+        print(&lattice_h[i]);
     }
-
-    printf("Enter num: ");
-    scanf("%d",&num);
-
-    fprintf(fptr,"%d",num);
+    
+    
     fclose(fptr);
+    
+    return lattice_h;
 
-
-}
+}*/
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -127,15 +128,11 @@ __global__ void update_lattice(signed char* lattice,
     joff = (i % 2) ? jnn : jpp;
   }
     
-  signed char h_sum = lattice_h[i * ny + j] * lattice[i * ny + j]
+  signed char h_sum = lattice_h[i * ny + j] //* lattice[i * ny + j]
 
   // Compute sum of nearest neighbor spins
   //signed char nn_sum = op_lattice[inn * ny + j] + op_lattice[i * ny + j] + op_lattice[ipp * ny + j] + op_lattice[i * ny + joff];
-  signed char nn_sum = op_lattice[inn * ny + j] * lattice_J[inn * ny + j] 
-      + op_lattice[i * ny + j] * lattice_J[i * ny + j]
-      + op_lattice[ipp * ny + j] * lattice_J[ipp * ny + j]
-      + op_lattice[i * ny + joff] * lattice_J[i * ny + joff]
-      + h_sum;
+  signed char nn_sum = op_lattice[inn * ny + j] * lattice_J[inn * ny + j] + op_lattice[i * ny + j] * lattice_J[i * ny + j] + op_lattice[ipp * ny + j] * lattice_J[ipp * ny + j] + op_lattice[i * ny + joff] * lattice_J[i * ny + joff] + h_sum ;
 
 
   // Determine whether to flip spin
@@ -246,6 +243,7 @@ int main(int argc, char **argv) {
   int niters = 1000;
   bool write = false;
   unsigned long long seed = 1234ULL;
+  
 
   while (1) {
     static struct option long_options[] = {
@@ -307,20 +305,27 @@ int main(int argc, char **argv) {
   CHECK_CUDA(cudaMalloc(&randvals, nx * ny/2 * sizeof(*randvals)));
 
   // Setup black and white lattice arrays on device
-  signed char *lattice_b, *lattice_w,*lattice_h,lattice_J; 
+  signed char *lattice_b, *lattice_w, *lattice_h, *lattice_J; 
   CHECK_CUDA(cudaMalloc(&lattice_b, nx * ny/2 * sizeof(*lattice_b)));
   CHECK_CUDA(cudaMalloc(&lattice_w, nx * ny/2 * sizeof(*lattice_w)));
     
   /////////////////////////////////////////////////////////////////////////setup h and J
   CHECK_CUDA(cudaMalloc(&lattice_h, nx * 1 * sizeof(*lattice_h)));
   CHECK_CUDA(cudaMalloc(&lattice_J, nx * ny/2 * sizeof(*lattice_J)));
-
+  //lattice_h = read_h(*lattice_h,nx);
+    
+  /*
+  for(int i=0;i<nx;i++)
+  {
+      print(&lattice_h[i]);
+  }*/
 
   int blocks = (nx * ny/2 + THREADS - 1) / THREADS;
   CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
   init_spins<<<blocks, THREADS>>>(lattice_b, randvals, nx, ny/2);
   CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
   init_spins<<<blocks, THREADS>>>(lattice_w, randvals, nx, ny/2);
+    
     
   //initial h and J
   CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
@@ -339,7 +344,7 @@ int main(int argc, char **argv) {
   printf("Starting trial iterations...\n");
   auto t0 = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < niters; i++) {
-    uupdate(lattice_b, lattice_w, lattice_h, lattice_J, randvals, rng, inv_temp, nx, ny);
+    update(lattice_b, lattice_w, lattice_h, lattice_J, randvals, rng, inv_temp, nx, ny);
     if (i % 1000 == 0) printf("Completed %d/%d iterations...\n", i+1, niters);
   }
 
