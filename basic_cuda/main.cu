@@ -51,7 +51,7 @@ __global__ void init_spins(signed char* lattice,
   lattice[tid] = val;
 }
 
-__global__ void init_h(signed char* lattice_h,
+__global__ void init_h(float* lattice_h,
                        const float* __restrict__ randvals,
                        const long long nx,
                        const long long ny){
@@ -65,7 +65,7 @@ __global__ void init_h(signed char* lattice_h,
 
 
 // Jij set 1
-__global__ void init_J(signed char* lattice_J,
+__global__ void init_J(float* lattice_J,
                        const float* __restrict__ randvals,
                        const long long nx,
                        const long long ny){
@@ -102,8 +102,8 @@ void read_h(signed char* lattice_h, nx){
 template<bool is_black>
 __global__ void update_lattice(signed char* lattice,
                                const signed char* __restrict__ op_lattice,
-                               const signed char* __restrict__ lattice_h,////
-                               const signed char* __restrict__ lattice_J,////
+                               const float* __restrict__ lattice_h,////
+                               const float* __restrict__ lattice_J,////
                                const float* __restrict__ randvals,
                                const float inv_temp,
                                const long long nx,
@@ -128,7 +128,7 @@ __global__ void update_lattice(signed char* lattice,
     joff = (i % 2) ? jnn : jpp;
   }
     
-  signed char h_sum = lattice_h[i * ny + j] //* lattice[i * ny + j]
+  signed char h_sum = lattice_h[j]; //* lattice[i * ny + j]
 
   // Compute sum of nearest neighbor spins
   //signed char nn_sum = op_lattice[inn * ny + j] + op_lattice[i * ny + j] + op_lattice[ipp * ny + j] + op_lattice[i * ny + joff];
@@ -185,7 +185,7 @@ void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string f
   free(lattice_w_h);
 }
 
-void update(signed char *lattice_b, signed char *lattice_w, signed char *lattice_h, signed char *lattice_J, float* randvals, curandGenerator_t rng, float inv_temp, long long nx, long long ny) {
+void update(signed char *lattice_b, signed char *lattice_w, float *lattice_h, float *lattice_J, float* randvals, curandGenerator_t rng, float inv_temp, long long nx, long long ny) {
 
   // Setup CUDA launch configuration
   int blocks = (nx * ny/2 + THREADS - 1) / THREADS;
@@ -305,7 +305,8 @@ int main(int argc, char **argv) {
   CHECK_CUDA(cudaMalloc(&randvals, nx * ny/2 * sizeof(*randvals)));
 
   // Setup black and white lattice arrays on device
-  signed char *lattice_b, *lattice_w, *lattice_h, *lattice_J; 
+  signed char *lattice_b, *lattice_w;
+  float *lattice_h, *lattice_J; 
   CHECK_CUDA(cudaMalloc(&lattice_b, nx * ny/2 * sizeof(*lattice_b)));
   CHECK_CUDA(cudaMalloc(&lattice_w, nx * ny/2 * sizeof(*lattice_w)));
     
@@ -330,6 +331,8 @@ int main(int argc, char **argv) {
   //initial h and J
   CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
   init_h<<<blocks, THREADS>>>(lattice_h, randvals, nx, 1);
+    
+  
   CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
   init_J<<<blocks, THREADS>>>(lattice_J, randvals, nx, ny/2);
 
