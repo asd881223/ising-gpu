@@ -98,7 +98,7 @@ void read_h(signed char* lattice_h, nx){
 }*/
 
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////  update_lattice start
 template<bool is_black>
 __global__ void update_lattice(signed char* lattice,
                                const signed char* __restrict__ op_lattice,
@@ -142,7 +142,7 @@ __global__ void update_lattice(signed char* lattice,
     lattice[i * ny + j] = -lij;
   }
 }
-////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////  update_lattice end
 
 
 // Write lattice configuration to file
@@ -155,7 +155,7 @@ void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string f
 
   CHECK_CUDA(cudaMemcpy(lattice_b_h, lattice_b, nx * ny/2 * sizeof(*lattice_b), cudaMemcpyDeviceToHost));
   CHECK_CUDA(cudaMemcpy(lattice_w_h, lattice_b, nx * ny/2 * sizeof(*lattice_w), cudaMemcpyDeviceToHost));
-
+  
   for (int i = 0; i < nx; i++) {
     for (int j = 0; j < ny/2; j++) {
       if (i % 2) {
@@ -313,7 +313,7 @@ int main(int argc, char **argv) {
   /////////////////////////////////////////////////////////////////////////setup h and J
   CHECK_CUDA(cudaMalloc(&lattice_h, nx * 1 * sizeof(*lattice_h)));
   CHECK_CUDA(cudaMalloc(&lattice_J, nx * ny/2 * sizeof(*lattice_J)));
-  float h[1000];  //////////////////////////////////////////////// read h
+  float h[nx];  //////////////////////////////////////////////// read h
   int count = 0;
   FILE *fh = fopen("H.txt", "r");
   for(int i=0;i<nx;i++)
@@ -324,25 +324,29 @@ int main(int argc, char **argv) {
   {
       printf("%lf\n",h[i]);
   }*/
-  fclose(fh);  ////////////////////////////////////////////////  end read h
   
-  char row[1000];  //////////////////////////////////////////////// read Jij
-  float J[1000000];
-  char *token;
-  int c0 = 0;
-  int c1 = 0;
+  fclose(fh);  
+    
+  
+  CHECK_CUDA(cudaMemcpy (lattice_h, h, nx * 1 * sizeof(*lattice_h),  cudaMemcpyHostToDevice ))
+  ////////////////////////////////////////////////  end read h
+  
+  ///////////////////////////////////////////////////////////// read Jij
+  float J[nx*ny];
   FILE *fj = fopen("Jij.txt", "r");
   for(int i=0;i<nx*ny;i++)
   {
       fscanf(fj,"%f",&J[i]);
   }
-  for(int i=0;i<nx*5;i++)
+  /*for(int i=0;i<nx*5;i++)
   {
       printf("%d : %lf\n",i,J[i]);
-  }
+  }*/
   
 
   fclose(fj);
+  CHECK_CUDA(cudaMemcpy (lattice_J, J, nx * ny/2 * sizeof(*lattice_J),  cudaMemcpyHostToDevice ))
+
 ////////////////////////////////////////////////////////////////// end read Jij
     
     
@@ -359,8 +363,8 @@ int main(int argc, char **argv) {
   //init_h<<<blocks, THREADS>>>(lattice_h, randvals, nx, 1);
     
   
-  CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
-  init_J<<<blocks, THREADS>>>(lattice_J, randvals, nx, ny/2);
+  //CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
+  //init_J<<<blocks, THREADS>>>(lattice_J, randvals, nx, ny/2);
 
   // Warmup iterations
   printf("Starting warmup...\n");
