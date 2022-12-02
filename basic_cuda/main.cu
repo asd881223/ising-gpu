@@ -48,7 +48,8 @@ __global__ void init_spins(signed char* lattice,
   if (tid >= nx * ny) return;
 
   float randval = randvals[tid];
-  signed char val = (randval < 0.5f) ? -1 : 1;
+  //signed char val = (randval < 0.5f) ? -1 : 1;
+  signed char val = 1;
   lattice[tid] = val;
 }
 
@@ -128,11 +129,11 @@ __global__ void update_lattice(signed char* lattice,
     joff = (i % 2) ? jnn : jpp;
   }
     
-  signed char h_sum = lattice_h[j]; //* lattice[i * ny + j]
+  float h_sum = lattice_h[j]; //* lattice[i * ny + j]
 
   // Compute sum of nearest neighbor spins
   //signed char nn_sum = op_lattice[inn * ny + j] + op_lattice[i * ny + j] + op_lattice[ipp * ny + j] + op_lattice[i * ny + joff];
-  signed char nn_sum = op_lattice[inn * ny + j] * lattice_J[inn * ny + j] + op_lattice[i * ny + j] * lattice_J[i * ny + j] + op_lattice[ipp * ny + j] * lattice_J[ipp * ny + j] + op_lattice[i * ny + joff] * lattice_J[i * ny + joff] + h_sum ;
+  float nn_sum = op_lattice[inn * ny + j] * lattice_J[inn * ny + j] + op_lattice[i * ny + j] * lattice_J[i * ny + j] + op_lattice[ipp * ny + j] * lattice_J[ipp * ny + j] + op_lattice[i * ny + joff] * lattice_J[i * ny + joff] + h_sum ;
 
 
   // Determine whether to flip spin
@@ -333,7 +334,7 @@ int main(int argc, char **argv) {
   
   ///////////////////////////////////////////////////////////// read Jij
   float J[nx*ny];
-  FILE *fj = fopen("Jij.txt", "r");
+  FILE *fj = fopen("Jij_1.txt", "r");
   for(int i=0;i<nx*ny;i++)
   {
       fscanf(fj,"%f",&J[i]);
