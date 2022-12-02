@@ -71,7 +71,8 @@ inv_temp = (1.0) / (args.alpha * TCRIT)
 # Generate lattice with random spins with shape of randval array
 @vectorize(['int8(float32)'], target='cuda')                             
 def generate_lattice(randval):            # 產生lattice 裡面是 1 and -1 
-    return 1 if randval > 0.5 else -1 
+    #return 1 if randval > 0.5 else -1 
+    return 1.
 
 @vectorize(['int8(float32)'], target='cuda')                             
 def generate_one(randval):            # 產生lattice 裡面是 1 and -1 
@@ -91,8 +92,8 @@ def read_h():
     return cuda.to_device(lattice_h)
 
 def read_J():
-    path = "Jij.txt"
-    df = np.loadtxt("Jij.txt",delimiter=",", dtype=float)
+    #path = "Jij-Copy1.txt"
+    df = np.loadtxt("Jij_1.txt",delimiter=" ", dtype=float)
     lattice_j = np.array(df)
     return cuda.to_device(lattice_j)
 
@@ -160,7 +161,7 @@ def update_lattice(lattice, op_lattice, lattice_h, lattice_J, randvals, is_black
     else:
         joff = jnn if (i % 2) else jpp
 
-    h_sum = lattice_h[i,j] *lattice[i,j]# h * sigma i
+    h_sum = lattice_h[j,0] #* lattice[i,j]# h * sigma i
     
     h_sum *= mu# mu = 1
     
@@ -295,7 +296,7 @@ ipch_w = comm.allgather(lattice_w.get_ipc_handle())
 lattices_b = [x.open() if i != rank else lattice_b for i,x in enumerate(ipch_b)]
 lattices_w = [x.open() if i != rank else lattice_w for i,x in enumerate(ipch_w)]
 
-##############################################   add   (why)
+##############################################   add   h and Jij
 ipch_h = comm.allgather(lattice_h.get_ipc_handle())
 lattices_h = [x.open() if i != rank else lattice_h for i,x in enumerate(ipch_h)]
 ipch_J = comm.allgather(lattice_J.get_ipc_handle())
